@@ -14,19 +14,17 @@ jobs:
           RA: ${{ secrets.AWS_ROLE_ARN }}
           RG: ${{ secrets.AWS_REGION }}
         run: |
-          echo "AWS_ROLE_ARN  len=${#RA}  sha256=$(printf '%s' "$RA" | sha256sum | cut -c1-16)"
-          echo "AWS_REGION    len=${#RG}  sha256=$(printf '%s' "$RG" | sha256sum | cut -c1-16)"
-          echo "starts_with_arn=$(case "$RA" in arn:aws:iam::*) echo yes;; *) echo NO;; esac)"
-
-      - name: Decode the OIDC token claims AWS actually receives
+          echo "AWS_ROLE_ARN len=${#RA} sha256=$(printf '%s' "$RA" | sha256sum | cut -c1-16)"
+          echo "AWS_REGION   len=${#RG} sha256=$(printf '%s' "$RG" | sha256sum | cut -c1-16)"
+          case "$RA" in
+            arn:aws:iam::*:role/*) echo "shape=looks-like-a-role-arn" ;;
+            "") echo "shape=EMPTY" ;;
+            *) echo "shape=UNEXPECTED" ;;
+          esac
+      - name: Decode the OIDC claims AWS receives
         run: |
-          TOK=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          TOK=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
           PAYLOAD=$(echo "$TOK" | cut -d. -f2)
           PAD=$(( (4 - ${#PAYLOAD} % 4) % 4 ))
           PAYLOAD="$PAYLOAD$(printf '=%.0s' $(seq 1 $PAD))"
-          echo "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | python3 -c "
-import sys,json
-c=json.load(sys.stdin)
-for k in ('iss','aud','sub','repository','repository_owner','ref','workflow'):
-    print(f'{k} = {c.get(k)}')"
+          echo "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | jq -c '{iss,aud,sub,repository,repository_owner,ref}'
